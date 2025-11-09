@@ -1,4 +1,3 @@
-// app/page.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -38,7 +37,7 @@ export default function Home() {
   const MIN_ANNOUNCE_GAP = 1800; // ms between announcements
 
   // simple distance estimation params
-  const focalPx = 700; // kept simple; seefor calibration if you want better accuracy
+  const focalPx = 700; // kept simple; see for calibration if you want better accuracy
   const avgHeights: Record<string, number> = {
     person: 1.7,
     bottle: 0.25,
@@ -53,6 +52,9 @@ export default function Home() {
   // detection history for stability + averaging distance
   const recentLabels = useRef<string[]>([]);
   const recentDistances = useRef<number[]>([]);
+
+  // remember last announced stable label so we avoid repeats and allow silence when nothing
+  const lastStableLabelAnnounced = useRef<string | null>(null);
 
   // ====== Load voices and detect Hindi availability ======
   useEffect(() => {
@@ -235,20 +237,41 @@ export default function Home() {
               const hiLabel = translateToHindi(stableLabel);
               const hiMsg = `पास में ${hiLabel} लगभग ${dRounded} मीटर दूर है।`;
 
-              setStatus(selectedLanguage === "hi" ? hiMsg : enMsg);
-              enqueueSpeakBoth(enMsg, hiMsg);
+              // Only announce when a *stable* label appears that is different from the last announced stable label
+              if (lastStableLabelAnnounced.current !== stableLabel) {
+                setStatus(selectedLanguage === "hi" ? hiMsg : enMsg);
+                enqueueSpeakBoth(enMsg, hiMsg);
+                lastStableLabelAnnounced.current = stableLabel;
+              } else {
+                // same stable label still present — update status silently (no audio)
+                setStatus(selectedLanguage === "hi" ? hiMsg : enMsg);
+              }
             } else {
               const enMsg = `Near you is a ${stableLabel}.`;
               const hiMsg = `पास में ${translateToHindi(stableLabel)} है।`;
-              setStatus(selectedLanguage === "hi" ? hiMsg : enMsg);
-              enqueueSpeakBoth(enMsg, hiMsg);
+
+              if (lastStableLabelAnnounced.current !== stableLabel) {
+                setStatus(selectedLanguage === "hi" ? hiMsg : enMsg);
+                enqueueSpeakBoth(enMsg, hiMsg);
+                lastStableLabelAnnounced.current = stableLabel;
+              } else {
+                setStatus(selectedLanguage === "hi" ? hiMsg : enMsg);
+              }
             }
+          } else {
+            // Not stable enough to announce — do not speak; update UI only
+            setStatus("Detecting...");
+            // Do NOT change lastStableLabelAnnounced here — keep previous announced label until a new stable appears
           }
         } else {
           // no detection
           recentLabels.current = [];
           recentDistances.current = [];
           setStatus("Nothing detected");
+
+          // Important: DO NOT speak anything when there is nothing detected.
+          // Also reset lastStableLabelAnnounced so that next detection will announce.
+          lastStableLabelAnnounced.current = null;
         }
       } catch (err) {
         console.error("detect err", err);
